@@ -1,30 +1,134 @@
-This package provides a Reflex wrapper around the ACE editor.  It is very
-incomplete and was derived from [code written for
-hsnippet](https://github.com/mightybyte/hsnippet/blob/64cc17d2bf2bcce219f3ab8e96b7fd6071d5b56b/frontend/src/ACE.hs).
-This is also intended to serve as an example of how to structure FFI packages
-that rely on external JS packages.
+# reflex-dom-ace
 
-running
--------
-You can run the test app with the following (assuming you've got
-`reflex-platform` at `..` and `wai-app-static` aka the `warp` binary installed
-in your path):
+## Overview
 
-Using one terminal, from this project's directory do:
-```shell
-warp -d lib
+This package provides a Reflex wrapper around the Ace editor.  It is somewhat incomplete and was derived from [code written for hsnippet](https://github.com/mightybyte/hsnippet/blob/64cc17d2bf2bcce219f3ab8e96b7fd6071d5b56b/frontend/src/ACE.hs).
+
+This is also intended to serve as an example of how to structure FFI packages that rely on external JS packages.
+
+## Example Usage with Obelisk
+
+### Add Dependency to Obelisk
+
+#### GitHub
+
+As per the [Obelisk FAQ](https://github.com/obsidiansystems/obelisk/blob/master/FAQ.md#how-do-i-declare-a-new-haskell-dependency), modify `default.nix` to look like:
+
+```
+# ...
+project ./. ({ pkgs, ... }: {
+# ...
+  overrides = self: super: let
+    aceSrc = pkgs.fetchFromGitHub {
+      owner = "SlimTim10";
+      repo = "reflex-dom-ace";
+      rev = "5d086c871892b9ebf7c66ad2d4d4f84023bea9b2";
+      sha256 = "0vizlf691s1rbkilhf23c79vkb6pns2x4b6b94szn9wd8mjizxyc";
+    };
+  in
+  {
+    reflex-dom-ace = self.callCabal2nix "reflex-dom-ace" aceSrc {};
+  };
+# ...
 ```
 
-Then in another terminal do:
-```shell
-../reflex-platform/work-on ghc ./.
-cabal configure
-cabal repl reflex-dom-ace-exe
+Change the `rev` to match the latest commit hash and leave the `sha256`. Then let `ob run` fail with the expected `sha256` and update the value accordingly.
+
+### Get Ace Editor
+
+Get the `src-noconflict` package from [ace-builds](https://github.com/ajaxorg/ace-builds) (tested with [package version 06.7.20](https://github.com/ajaxorg/ace-builds/tree/53be42342df216d2d25dc60a12dfcb263c6f0592/src-noconflict)). Move the `src-noconflict` contents to the project directory `static/ace/`.
+
+E.g.,
+
+```
+$ cd ~
+$ git clone https://github.com/ajaxorg/ace-builds
+$ mv ~/ace-builds/src-noconflict ~/my-obelisk-project/static/ace
 ```
 
-That will drop you into the repl from which you can simply:
-```haskell
-runDef
+### Editor.hs
+
+```
+module Editor
+  ( widget
+  ) where
+
+import Data.Text (Text)
+import Control.Monad (void)
+import Data.Functor ((<&>))
+
+import qualified Language.Javascript.JSaddle.Types as JS
+import qualified Reflex.Dom.Ace as Ace
+import qualified Reflex.Dom.Core as R
+import Reflex.Dom.Core ((=:))
+
+widget
+  :: forall t m.
+     ( R.DomBuilder t m
+     , R.TriggerEvent t m
+     , JS.MonadJSM (R.Performable m)
+     , JS.MonadJSM m
+     , R.PerformEvent t m
+     , R.PostBuild t m
+     , R.MonadHold t m
+     )
+  => m (R.Dynamic t Text)
+widget = do
+  let containerId = "editor"
+  void $ R.elAttr "div" (
+    "id" =: containerId
+    ) R.blank
+  (script, _) <- R.elAttr' "script" (
+    "src" =: "/static/ace/ace.js"
+    <> "type" =: "text/javascript"
+    <> "charset" =: "utf-8"
+    ) R.blank
+  let scriptLoaded = () <$ R.domEvent R.Load script
+  let loading = R.el "p" $ R.text "Loading editor..." <&> const (R.constDyn "")
+  dt :: R.Dynamic t (R.Dynamic t Text) <- R.widgetHold loading
+    $ R.ffor scriptLoaded
+    $ const $ do
+      ace <- do
+        let
+          cfg = R.def
+            { Ace._aceConfigMode = Just "latex"
+            }
+        Ace.aceWidget cfg (Ace.AceDynConfig (Just Ace.AceTheme_Clouds)) R.never containerId "" R.never
+      return $ Ace.aceValue ace
+  R.holdDyn "" . R.switchDyn $ R.updated <$> dt
 ```
 
-Then visit [http://localhost:8888]().
+### Frontend.hs
+
+```
+module Frontend where
+
+import Obelisk.Frontend
+import Obelisk.Configs
+import Obelisk.Route
+import Obelisk.Generated.Static
+
+import Reflex.Dom.Core
+
+import Common.Api
+import Common.Route
+
+import qualified Editor
+
+frontend :: Frontend (R FrontendRoute)
+frontend = Frontend
+  { _frontend_head = do
+      el "title" $ text "Obelisk Minimal Example"
+      elAttr "link" ("href" =: static @"main.css" <> "type" =: "text/css" <> "rel" =: "stylesheet") blank
+  , _frontend_body = do
+      prerender_ blank $ do
+        editorContents :: Dynamic t Text <- Editor.widget
+        -- Do something with editorContents
+        return ()
+  }
+```
+
+## Important Notes
+
+This currently does not work if your app is using reflex-dom's
+mainWidgetWithHead or mainWidgetWithCss.
