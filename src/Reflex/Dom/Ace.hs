@@ -2,24 +2,6 @@
 
 Basic support for using the Ace editor with Reflex.
 
-IMPORTANT NOTE:
-
-This currently does not work if your app is using reflex-dom's
-mainWidgetWithHead or mainWidgetWithCss.
-
-Example usage:
-
-    ace <- divClass "yourAceWrapperDiv" $ -- wrapper div not required
-      aceWidget R.def (AceDynConfig Nothing) never "initial editor contents"
-
-    -- The rest is optional and lets you change what's in the editor on the fly
-    -- fly without redrawing the widget.
-    withAceInstance ace (setValueAce <$> updatesToContents)
-    holdDyn iv $ leftmost
-      [ updatesToContents
-      , updated (aceValue ace)
-      ]
-
 -}
 
 module Reflex.Dom.Ace where
