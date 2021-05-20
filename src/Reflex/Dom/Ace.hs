@@ -1,15 +1,6 @@
-{-# LANGUAGE ConstraintKinds       #-}
-{-# LANGUAGE FlexibleContexts      #-}
-{-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE LambdaCase            #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE ScopedTypeVariables   #-}
-{-# LANGUAGE TypeFamilies          #-}
-{-# LANGUAGE UndecidableInstances  #-}
-
 {-|
 
-Basic support for using the ACE editor with Reflex.
+Basic support for using the Ace editor with Reflex.
 
 IMPORTANT NOTE:
 
@@ -18,12 +9,12 @@ mainWidgetWithHead or mainWidgetWithCss.
 
 Example usage:
 
-    ace <- divClass "yourACEWrapperDiv" $ -- wrapper div not required
-      aceWidget def (AceDynConfig Nothing) never "initial editor contents"
+    ace <- divClass "yourAceWrapperDiv" $ -- wrapper div not required
+      aceWidget R.def (AceDynConfig Nothing) never "initial editor contents"
 
     -- The rest is optional and lets you change what's in the editor on the fly
     -- fly without redrawing the widget.
-    withAceInstance ace (setValueACE <$> updatesToContents)
+    withAceInstance ace (setValueAce <$> updatesToContents)
     holdDyn iv $ leftmost
       [ updatesToContents
       , updated (aceValue ace)
@@ -31,33 +22,21 @@ Example usage:
 
 -}
 
-module Reflex.Dom.ACE where
+module Reflex.Dom.Ace where
 
-------------------------------------------------------------------------------
-import           Control.Lens                       ((^.))
-import           Control.Monad                      (unless, void)
-import           Control.Monad.Trans
-import           Data.Default
-import           Data.Map                           (Map)
-import qualified Data.Map                           as M
-import           Data.Maybe                         (fromMaybe)
-import           Data.Monoid
-import           Data.Text                          (Text)
-import qualified Data.Text                          as T
-import           GHCJS.DOM.Types                    (Element, JSVal, toJSString)
-import           Language.Javascript.JSaddle        (asyncFunction,
-                                                     fromJSValUnchecked, js,
-                                                     js0, js1, js2, jsg, jsval,
-                                                     pToJSVal)
-import           Language.Javascript.JSaddle.Object (MakeObject (..), create,
-                                                     (<#))
-import           Language.Javascript.JSaddle.Types  (JSM, MonadJSM, ghcjsPure,
-                                                     liftJSM)
-import           Language.Javascript.JSaddle.Value  (ToJSVal (..), jsNull)
-import           Reflex
-import           Reflex.Dom.Core                    hiding (Element,
-                                                     fromJSString)
-------------------------------------------------------------------------------
+import Control.Lens ((^.))
+import Control.Monad (unless, void, join)
+import Data.Default (Default)
+import Data.Map (Map)
+import Data.Maybe (fromMaybe)
+import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Control.Monad.Trans as Trans
+import qualified Data.Bifunctor as Bi
+
+import qualified Language.Javascript.JSaddle as JS
+import Language.Javascript.JSaddle.Object ((<#))
+import qualified Reflex.Dom.Core as R
 
 
 data AceTheme
@@ -151,15 +130,15 @@ data AceDynConfig = AceDynConfig
 
 
 instance Default AceConfig where
-    def = AceConfig def def def False False
+    def = AceConfig R.def R.def R.def False False
 
 
-newtype AceInstance = AceInstance { unAceInstance :: JSVal }
+newtype AceInstance = AceInstance { unAceInstance :: JS.JSVal }
 
 
-data ACE t = ACE
-    { aceRef   :: Dynamic t (Maybe AceInstance)
-    , aceValue :: Dynamic t Text
+data Ace t = Ace
+    { aceRef   :: R.Dynamic t (Maybe AceInstance)
+    , aceValue :: R.Dynamic t Text
     }
 
 
@@ -170,9 +149,9 @@ data AnnotationType = AnnotationError
                     deriving (Show, Read)
 
 ------------------------------------------------------------------------------
-instance ToJSVal AnnotationType where
-  toJSVal AnnotationError   = toJSVal "error"
-  toJSVal AnnotationWarning = toJSVal "warning"
+instance JS.ToJSVal AnnotationType where
+  toJSVal AnnotationError   = JS.toJSVal ("error":: Text)
+  toJSVal AnnotationWarning = JS.toJSVal ("warning" :: Text)
 
 
 ------------------------------------------------------------------------------
@@ -186,131 +165,127 @@ data Annotation = Annotation { annotationRow    :: Int
 
 
 ------------------------------------------------------------------------------
-instance MakeObject Annotation where
+instance JS.MakeObject Annotation where
   makeObject (Annotation row col txt typ) = do
-    o <- create
-    (o <# "row"   ) row
-    (o <# "column") col
-    (o <# "text"  ) txt
-    (o <# "type"  ) typ
+    o <- JS.create
+    (o <# ("row" :: Text)   ) row
+    (o <# ("column" :: Text)) col
+    (o <# ("text" :: Text)  ) txt
+    (o <# ("type" :: Text)  ) typ
     return o
 
 
-instance ToJSVal Annotation where
-  toJSVal = (toJSVal =<<) . makeObject
+instance JS.ToJSVal Annotation where
+  toJSVal = (JS.toJSVal =<<) . JS.makeObject
 
 
 ------------------------------------------------------------------------------
-mtext2val :: Maybe Text -> JSM JSVal
-mtext2val = maybe (pure jsNull) (ghcjsPure . jsval . toJSString)
-
-
-------------------------------------------------------------------------------
-startACE :: MonadJSM m => Element -> AceConfig -> m AceInstance
-startACE elmt ac = liftJSM $ do
-  aceVal <- jsg "ace"
-  let [basePath, mode] = map (fromMaybe (T.pack "") . ($ ac))
-                              [_aceConfigBasePath, _aceConfigMode]
+startAce :: JS.MonadJSM m => Text -> AceConfig -> m AceInstance
+startAce containerId ac = JS.liftJSM $ do
+  aceVal <- JS.jsg ("ace" :: Text)
+  let
+    (basePath, mode) = join Bi.bimap (fromMaybe (T.pack "") . ($ ac))
+      (_aceConfigBasePath, _aceConfigMode)
   -- Set the base path if given
   unless (T.null basePath) $ do
-    config <- aceVal ^. js "config"
-    void $ config ^. js2 "set" "basePath" basePath
+    config <- aceVal ^. JS.js ("config" :: Text)
+    void $ config ^. JS.js2 ("set" :: Text) ("basePath" :: Text) basePath
   -- Start and return an editing session
-  editSession <- aceVal ^. js1 "edit" (pToJSVal elmt)
+  editor <- aceVal ^. JS.js1 ("edit" :: Text) containerId
+  let aceInst = AceInstance editor
   -- Set the mode if given
   unless (T.null mode) $ do
-    session <- editSession ^. js "session"
-    void $ session ^. js1 "setMode" mode
-  let aceInst  = AceInstance editSession
+    setModeAce mode aceInst
   setUseWrapMode (_aceConfigWordWrap ac) aceInst
   setShowPrintMargin (_aceConfigShowPrintMargin ac) aceInst
   return aceInst
 
 
 ------------------------------------------------------------------------------
-moveCursorToPosition :: MonadJSM m => (Int, Int) -> AceInstance -> m ()
+moveCursorToPosition :: JS.MonadJSM m => (Int, Int) -> AceInstance -> m ()
 moveCursorToPosition (r, c) (AceInstance ace) =
-  liftJSM $ void $ ace ^. js2 "gotoLine" r c
+  JS.liftJSM $ void $ ace ^. JS.js2 ("gotoLine" :: Text) r c
 
 
 ------------------------------------------------------------------------------
-setThemeACE :: MonadJSM m => Maybe AceTheme -> AceInstance -> m ()
-setThemeACE Nothing      _                 = return ()
-setThemeACE (Just theme) (AceInstance ace) =
-  liftJSM $ void $ ace ^. js1 "setTheme" themeStr
+setThemeAce :: JS.MonadJSM m => Maybe AceTheme -> AceInstance -> m ()
+setThemeAce Nothing      _                 = return ()
+setThemeAce (Just theme) (AceInstance ace) =
+  JS.liftJSM $ void $ ace ^. JS.js1 ("setTheme" :: Text) themeStr
   where themeStr = "ace/theme/" <> show theme
 
 
 ------------------------------------------------------------------------------
-setModeACE :: MonadJSM m => Text -> AceInstance -> m ()
-setModeACE mode (AceInstance ace) = liftJSM $ do
-  session <- ace ^. js "session"
-  void $ session ^. js1 "setMode" mode
+setModeAce :: JS.MonadJSM m => Text -> AceInstance -> m ()
+setModeAce mode (AceInstance ace) = JS.liftJSM $ do
+  session <- ace ^. JS.js ("session" :: Text)
+  void $ session ^. JS.js1 ("setMode" :: Text) modeStr
+  where modeStr = "ace/mode/" <> mode
 
 
 ------------------------------------------------------------------------------
-setUseWrapMode :: MonadJSM m => Bool -> AceInstance -> m ()
-setUseWrapMode shouldWrap (AceInstance ace) = liftJSM $ do
-  session <- ace ^. js0 "getSession"
-  void $ session ^. js1 "setUseWrapMode" shouldWrap
+setUseWrapMode :: JS.MonadJSM m => Bool -> AceInstance -> m ()
+setUseWrapMode shouldWrap (AceInstance ace) = JS.liftJSM $ do
+  session <- ace ^. JS.js0 ("getSession" :: Text)
+  void $ session ^. JS.js1 ("setUseWrapMode" :: Text) shouldWrap
 
 
 ------------------------------------------------------------------------------
-setShowPrintMargin :: MonadJSM m => Bool -> AceInstance -> m ()
+setShowPrintMargin :: JS.MonadJSM m => Bool -> AceInstance -> m ()
 setShowPrintMargin shouldShow (AceInstance ace) =
-  liftJSM $ void $ ace ^. js2 "setOption" "showPrintMargin" shouldShow
+  JS.liftJSM $ void $ ace ^. JS.js2 ("setOption" :: Text) ("showPrintMargin" :: Text) shouldShow
 
 
 ------------------------------------------------------------------------------
-setUseWorker :: MonadJSM m => Bool -> AceInstance -> m ()
+setUseWorker :: JS.MonadJSM m => Bool -> AceInstance -> m ()
 setUseWorker shouldUse (AceInstance ace) =
-  liftJSM $ void $ ace ^. js2 "setOption" "useWorker" shouldUse
+  JS.liftJSM $ void $ ace ^. JS.js2 ("setOption" :: Text) ("useWorker" :: Text) shouldUse
 
 
 ------------------------------------------------------------------------------
-setAnnotations :: MonadJSM m => [Annotation] -> AceInstance -> m ()
-setAnnotations as (AceInstance ace) = liftJSM $ do
-  session <- ace ^. js0 "getSession"
-  annotations <- toJSValListOf as
-  void $ session ^. js1 "setAnnotations" annotations
+setAnnotations :: JS.MonadJSM m => [Annotation] -> AceInstance -> m ()
+setAnnotations as (AceInstance ace) = JS.liftJSM $ do
+  session <- ace ^. JS.js0 ("getSession" :: Text)
+  annotations <- JS.toJSValListOf as
+  void $ session ^. JS.js1 ("setAnnotations" :: Text) annotations
 
 
 ------------------------------------------------------------------------------
-setConfigACE :: MonadJSM m => Text -> Text -> AceInstance -> m ()
-setConfigACE t1 t2 (AceInstance ace) = liftJSM $ do
-  cfg <- ace ^. js "config"
-  void $ cfg ^. js2 "set" t1 t2
+setConfigAce :: JS.MonadJSM m => Text -> Text -> AceInstance -> m ()
+setConfigAce t1 t2 (AceInstance ace) = JS.liftJSM $ do
+  cfg <- ace ^. JS.js ("config" :: Text)
+  void $ cfg ^. JS.js2 ("set" :: Text) t1 t2
 
 
 ------------------------------------------------------------------------------
-getValueACE :: MonadJSM m => AceInstance -> m Text
-getValueACE (AceInstance ace) =
-  liftJSM $ ace ^. js0 "getValue" >>= fromJSValUnchecked
+getValueAce :: JS.MonadJSM m => AceInstance -> m Text
+getValueAce (AceInstance ace) =
+  JS.liftJSM $ ace ^. JS.js0 ("getValue" :: Text) >>= JS.fromJSValUnchecked
 
 
 ------------------------------------------------------------------------------
-setValueACE :: MonadJSM m => Text -> AceInstance -> m ()
-setValueACE t (AceInstance ace) =
-  liftJSM $ void $ ace ^. js2 "setValue" t (-1 :: Int)
+setValueAce :: JS.MonadJSM m => Text -> AceInstance -> m ()
+setValueAce t (AceInstance ace) =
+  JS.liftJSM $ void $ ace ^. JS.js2 ("setValue" :: Text) t (-1 :: Int)
 
 
 ------------------------------------------------------------------------------
 setupValueListener
-  :: ( MonadJSM (Performable m)
-     , DomBuilder t m
-     , PostBuild t m
-     , TriggerEvent t m
-     , PerformEvent t m
+  :: ( JS.MonadJSM (R.Performable m)
+     , R.DomBuilder t m
+     , R.PostBuild t m
+     , R.TriggerEvent t m
+     , R.PerformEvent t m
      )
   => AceInstance
-  -> m (Event t Text)
+  -> m (R.Event t Text)
 setupValueListener (AceInstance ace) = do
-  pb  <- getPostBuild
-  let act cb = liftJSM $ do
-        jscb <- asyncFunction $ \_ _ _ ->
-          getValueACE (AceInstance ace) >>= liftIO . cb
-        void $ ace ^. js2 "on" "change" jscb
-  performEventAsync (act <$ pb)
+  pb  <- R.getPostBuild
+  let act cb = JS.liftJSM $ do
+        jscb <- JS.asyncFunction $ \_ _ _ ->
+          getValueAce (AceInstance ace) >>= Trans.liftIO . cb
+        void $ ace ^. JS.js2 ("on" :: Text) ("change" :: Text) jscb
+  R.performEventAsync (act <$ pb)
 
 
 ------------------------------------------------------------------------------
@@ -321,34 +296,40 @@ setupValueListener (AceInstance ace) = do
 -- This currently does not work if your app is using reflex-dom's
 -- mainWidgetWithHead or mainWidgetWithCss.
 aceWidget
-    :: MonadWidget t m
-    => AceConfig -> AceDynConfig -> Event t AceDynConfig -> Text -> m (ACE t)
-aceWidget ac adc adcUps initContents = do
-    attrs <- holdDyn (addThemeAttr adc) (addThemeAttr <$> adcUps)
-    aceDiv <- fmap fst $ elDynAttr' (T.pack "div") attrs $ text initContents
-    aceInstance <- startACE (_element_raw aceDiv) ac
+    :: ( R.DomBuilder t m
+       , R.PostBuild t m
+       , R.MonadHold t m
+       , JS.MonadJSM m
+       , R.TriggerEvent t m
+       , R.PerformEvent t m
+       , JS.MonadJSM (R.Performable m)
+       )
+    => AceConfig -- ^ Ace editor configurations
+    -> AceDynConfig -- ^ Ace editor theme
+    -> R.Event t AceDynConfig -- ^ Updatable Ace editor theme
+    -> Text -- ^ ID of desired container element
+    -> Text -- ^ Initial Ace editor contents
+    -> R.Event t Text -- ^ Updatable Ace editor contents
+    -> m (Ace t)
+aceWidget ac adc adcUps containerId initContents contentsUps = do
+    aceInstance <- startAce containerId ac
     onChange <- setupValueListener aceInstance
-    updatesDyn <- holdDyn initContents onChange
+    updatesDyn <- R.holdDyn initContents onChange
 
-    let ace = ACE (constDyn $ pure aceInstance) updatesDyn
-    setThemeACE (_aceDynConfigTheme adc) aceInstance
-    withAceInstance ace (setThemeACE . _aceDynConfigTheme <$> adcUps)
+    let ace = Ace (R.constDyn $ pure aceInstance) updatesDyn
+    setThemeAce (_aceDynConfigTheme adc) aceInstance
+    void $ withAceInstance ace (setThemeAce . _aceDynConfigTheme <$> adcUps)
+    R.performEvent_ $ R.ffor contentsUps $ \c -> setValueAce c aceInstance
     return ace
-  where
-    static = _aceConfigElemAttrs ac
-    themeAttr t = T.pack $ " ace-" <> show t
-    addThemeAttr c = maybe static
-      (\t -> M.insertWith (<>) (T.pack "class") (themeAttr t) static)
-      (_aceDynConfigTheme c)
 
 
 ------------------------------------------------------------------------------
 -- | Convenient helper function for running functions that need an AceInstance.
 withAceInstance
-    :: PerformEvent t m
-    => ACE t
-    -> Event t (AceInstance -> Performable m ())
-    -> m (Event t ())
+    :: R.PerformEvent t m
+    => Ace t
+    -> R.Event t (AceInstance -> R.Performable m ())
+    -> m (R.Event t ())
 withAceInstance ace evt = withAceInstance' ace (f <$> evt)
   where
     f _ Nothing  = return ()
@@ -358,9 +339,9 @@ withAceInstance ace evt = withAceInstance' ace (f <$> evt)
 ------------------------------------------------------------------------------
 -- | More powerful function for running functions that need an AceInstance.
 withAceInstance'
-    :: PerformEvent t m
-    => ACE t
-    -> Event t (Maybe AceInstance -> Performable m a)
-    -> m (Event t a)
+    :: R.PerformEvent t m
+    => Ace t
+    -> R.Event t (Maybe AceInstance -> R.Performable m a)
+    -> m (R.Event t a)
 withAceInstance' ace =
-  performEvent . attachPromptlyDynWith (flip ($)) (aceRef ace)
+  R.performEvent . R.attachPromptlyDynWith (flip ($)) (aceRef ace)
