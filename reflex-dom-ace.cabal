@@ -25,6 +25,10 @@ library
     , reflex-dom-core
     , text
 
+  default-extensions:
+    OverloadedStrings
+    FlexibleContexts
+
   if impl(ghcjs)
     cpp-options: -DGHCJS_GC_INTERVAL=60000
 
