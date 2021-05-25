@@ -1,6 +1,6 @@
 cabal-version: 1.24
 Name: reflex-dom-ace
-version: 0.3.0.1
+version: 0.3.0.2
 Synopsis: Basic support for using the Ace editor with Reflex.
 Description:
   Provides basic support for using the Ace editor with Reflex-DOM web apps.
