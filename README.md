@@ -12,6 +12,27 @@ This is also intended to serve as an example of how to structure FFI packages th
 
 ### Add Dependency to Obelisk
 
+#### Hackage
+
+As per the [Obelisk FAQ](https://github.com/obsidiansystems/obelisk/blob/master/FAQ.md#how-do-i-declare-a-new-haskell-dependency), modify `default.nix` to look like:
+
+```
+# ...
+project ./. ({ pkgs, ... }: {
+# ...
+  overrides = self: super:
+  {
+    reflex-dom-ace = self.callHackageDirect {
+      pkg = "reflex-dom-ace";
+      ver = "0.3.0.1";
+      sha256 = "0kbd3kqmsx4115a39a984m62kgc9s96586c5yx80nijman8j0zlw";
+    } {};
+  };
+# ...
+```
+
+Change the `ver` to match the desired version and leave the `sha256`. Then let `ob run` fail with the expected `sha256` and update the value accordingly.
+
 #### GitHub
 
 As per the [Obelisk FAQ](https://github.com/obsidiansystems/obelisk/blob/master/FAQ.md#how-do-i-declare-a-new-haskell-dependency), modify `default.nix` to look like:
