@@ -1,11 +1,19 @@
-name:                reflex-dom-ace
-version:             0.3.0.0
-license:             BSD3
-author:              Doug Beardsley, Tim Johns
-maintainer:          mightybyte@gmail.com, slimtim10@gmail.com
-category:            Web
-build-type:          Simple
-cabal-version:       >=1.10
+cabal-version: 1.24
+Name: reflex-dom-ace
+version: 0.3.0.1
+Synopsis: Basic support for using the Ace editor with Reflex.
+Description:
+  Provides basic support for using the Ace editor with Reflex-DOM web apps.
+  .
+  Ace editor: <https://ace.c9.io/>.
+License: BSD3
+License-file: LICENSE
+Author: Doug Beardsley, Tim Johns
+Maintainer: slimtim10@gmail.com
+Category: Web
+Build-type: Simple
+Stability: Experimental
+extra-source-files: README.md
 
 library
   hs-source-dirs: src
@@ -34,3 +42,7 @@ library
   ghc-options: -Wall -fno-warn-unused-do-bind -fno-warn-orphans
 
   default-language: Haskell2010
+
+source-repository head
+  type: git
+  location: https://github.com/SlimTim10/reflex-dom-ace
