@@ -33,6 +33,8 @@ project ./. ({ pkgs, ... }: {
 
 Change the `ver` to match the desired version and leave the `sha256`. Then let `ob run` fail with the expected `sha256` and update the value accordingly.
 
+NOTE: It may be necessary to run `nix-collect-garbage` to clear the cache before `ob run`.
+
 #### GitHub
 
 As per the [Obelisk FAQ](https://github.com/obsidiansystems/obelisk/blob/master/FAQ.md#how-do-i-declare-a-new-haskell-dependency), modify `default.nix` to look like:
@@ -56,6 +58,8 @@ project ./. ({ pkgs, ... }: {
 ```
 
 Change the `rev` to match the latest commit hash and leave the `sha256`. Then let `ob run` fail with the expected `sha256` and update the value accordingly.
+
+NOTE: It may be necessary to run `nix-collect-garbage` to clear the cache before `ob run`.
 
 ### Get Ace Editor
 
